@@ -1,0 +1,4 @@
+node_modules
+releases
+.git
+*.nupkg
