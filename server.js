@@ -5,44 +5,16 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-const GITHUB_LFS_BATCH_URL = 'https://github.com/Noble200/allva-updates-server.git/info/lfs/objects/batch';
+const GITHUB_OWNER = 'Noble200';
+const GITHUB_REPO = 'allva-updates-server';
 
-// Parse Git LFS pointer file content
-function parseLfsPointer(content) {
-    if (!content.startsWith('version https://git-lfs.github.com/spec/v1')) {
-        return null;
-    }
-    const lines = content.split('\n');
-    let oid = null, size = null;
-    for (const line of lines) {
-        if (line.startsWith('oid sha256:')) {
-            oid = line.replace('oid sha256:', '').trim();
-        } else if (line.startsWith('size ')) {
-            size = parseInt(line.replace('size ', '').trim());
-        }
-    }
-    return oid && size ? { oid, size } : null;
-}
-
-// Get download URL from GitHub LFS API
-async function getLfsDownloadUrl(oid, size) {
-    const response = await fetch(GITHUB_LFS_BATCH_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/vnd.git-lfs+json',
-            'Accept': 'application/vnd.git-lfs+json'
-        },
-        body: JSON.stringify({
-            operation: 'download',
-            transfers: ['basic'],
-            objects: [{ oid, size }]
-        })
-    });
-    const data = await response.json();
-    if (data.objects && data.objects[0] && data.objects[0].actions) {
-        return data.objects[0].actions.download.href;
-    }
-    return null;
+// Build GitHub Release download URL from filename
+// AllvaSystem-1.4.2-full.nupkg -> https://github.com/.../releases/download/v1.4.2/AllvaSystem-1.4.2-full.nupkg
+function getGitHubReleaseUrl(filename) {
+    const match = filename.match(/^AllvaSystem-(\d+\.\d+\.\d+(?:\.\d+)?)-/);
+    if (!match) return null;
+    const version = match[1];
+    return `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/v${version}/${filename}`;
 }
 
 // CORS
@@ -59,43 +31,20 @@ app.use((req, res, next) => {
     next();
 });
 
-// LFS resolver middleware - intercept .nupkg requests
-app.use(async (req, res, next) => {
-    if (!req.path.endsWith('.nupkg')) {
-        return next();
-    }
+// Redirect .nupkg requests to GitHub Releases (bypasses Git LFS)
+app.use((req, res, next) => {
+    if (!req.path.endsWith('.nupkg')) return next();
 
-    const filePath = path.join(__dirname, 'releases', req.path);
+    const filename = path.basename(req.path);
+    const redirectUrl = getGitHubReleaseUrl(filename);
 
-    try {
-        if (!fs.existsSync(filePath)) {
-            return next();
-        }
+    if (!redirectUrl) return next();
 
-        const content = fs.readFileSync(filePath, 'utf8');
-        const lfsPointer = parseLfsPointer(content);
-
-        if (!lfsPointer) {
-            return next();
-        }
-
-        console.log(`LFS redirect: ${req.path} (${(lfsPointer.size / 1024 / 1024).toFixed(1)} MB)`);
-
-        const downloadUrl = await getLfsDownloadUrl(lfsPointer.oid, lfsPointer.size);
-
-        if (downloadUrl) {
-            return res.redirect(302, downloadUrl);
-        } else {
-            console.error(`Failed to resolve LFS URL for ${req.path}`);
-            return res.status(500).json({ error: 'Failed to resolve LFS file' });
-        }
-    } catch (err) {
-        // If readFileSync fails (binary file, not LFS pointer), serve normally
-        return next();
-    }
+    console.log(`GitHub Releases redirect: ${filename}`);
+    return res.redirect(302, redirectUrl);
 });
 
-// Serve static files from /releases
+// Serve static files from /releases (RELEASES, releases.win.json, etc.)
 app.use(express.static(path.join(__dirname, 'releases'), {
     setHeaders: (res, filePath) => {
         if (filePath.endsWith('.nupkg')) {
@@ -139,5 +88,5 @@ app.get('/api/list', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Allva Updates Server running on port ${PORT}`);
     console.log(`Serving files from: ${path.join(__dirname, 'releases')}`);
-    console.log(`LFS redirect enabled for .nupkg files`);
+    console.log(`GitHub Releases redirect enabled for .nupkg files`);
 });
