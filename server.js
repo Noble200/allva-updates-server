@@ -4,6 +4,7 @@ const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+const SERVER_VERSION = '1.2.0';
 
 const GITHUB_OWNER = 'Noble200';
 const GITHUB_REPO = 'allva-updates-server';
@@ -58,7 +59,7 @@ app.get('/', (req, res) => {
     res.json({
         service: 'Allva System Updates Server',
         status: 'online',
-        version: '1.1.0',
+        version: SERVER_VERSION,
         timestamp: new Date().toISOString()
     });
 });
